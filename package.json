@@ -1,0 +1,9 @@
+{
+  "type": "module",
+  "name": "rufs-iso8583router-es6",
+  "version": "0.0.1",
+  "dependencies": {
+    "rufs-crud-es6": "git+https://github.com/alexsandrostefenon/rufs-crud-es6.git",
+    "xml2js": "^0.4.23"
+  }
+}

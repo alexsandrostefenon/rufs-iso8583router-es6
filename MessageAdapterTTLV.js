@@ -1,28 +1,22 @@
-package org.domain.financial.messages;
-
-import java.util.List;
-
-import org.domain.financial.entity.MessageAdapterConf;
-import org.domain.financial.entity.MessageAdapterConfItem;
-import org.domain.utils.Utils;
-
-public class MessageAdapterTTLV implements MessageAdapter {
+class MessageAdapterTTLV {
 	
-	private void parse(Message message, MessageAdapterConfItem conf, String value) throws Exception {
+	//private
+	static parse(message, conf, value) {
 		if (value != null && value.length() > 0) {
-			boolean mayBeSpecial = (conf.getDataType() == MessageAdapterConfItem.DATA_TYPE_SPECIAL);
+			let mayBeSpecial = (conf.getDataType() == MessageAdapterConfItem.DATA_TYPE_SPECIAL);
 			
 			if (mayBeSpecial == true && message.enableBinarySkip == true) {
 				value = Utils.replaceBinarySkipes(value, 0, value.length());
 			}
 			
-			conf.setFieldData(message, value);
+			MessageAdapterConfItem.setFieldData(conf, message, value);
 		} else {
-			conf.setFieldData(message, null);
+			MessageAdapterConfItem.setFieldData(conf, message, null);
 		}
 	}
 	
-	private static String unEscapeBinaryData(String data, String escapeLeft, String escapeRight, int maxEscapeSize) {
+	//private
+	static unEscapeBinaryData(data, escapeLeft, escapeRight, maxEscapeSize) {
 		if (data == null) {
 			return null;
 		}
@@ -31,29 +25,29 @@ public class MessageAdapterTTLV implements MessageAdapter {
 			return data;
 		}
 		
-		int firstPos = data.indexOf(escapeLeft);
+		let firstPos = data.indexOf(escapeLeft);
 		
 		if (firstPos < 0) {
 			return data;
 		}
 		
-		StringBuilder buffer = new StringBuilder(data.length());
-		int offset = 0;
-		int srcLen = data.length();
+		let buffer = new StringBuilder(data.length());
+		let offset = 0;
+		let srcLen = data.length();
 		
 		while (offset < srcLen) {
 			if (offset < srcLen - (escapeLeft.length() + 1 + escapeRight.length())) {
 				if (data.startsWith(escapeLeft, offset)) {
-					int posIni = offset + escapeLeft.length();
-					int posEnd = data.indexOf(escapeRight, posIni);
+					let posIni = offset + escapeLeft.length();
+					let posEnd = data.indexOf(escapeRight, posIni);
 					
 					if (posEnd > posIni && posEnd <= posIni + maxEscapeSize) {
-						if (Utils.isHex(data, posIni, posEnd, true, false)) {
-							String hex = data.substring(posIni, posEnd);
-							int val = Utils.hexToInt(hex, 0, posEnd-posIni, '0', '0');
-							char ch = (char) val;
-							buffer.append(ch);
-//							System.out.printf("value = %d - %d - %d - %d - %d - %d\n", (int) ch, (int) b[0], val, (int) buffer.toString().getBytes()[0], (int) buffer.toString().charAt(0), (int) buffer.toString().charAt(1));
+						if (/^[\dA-F]+$/i.test(data.substring(posIni, posEnd)) == true) {
+							let hex = data.substring(posIni, posEnd);
+							let val = Utils.hexToInt(hex, 0, posEnd-posIni, '0', '0');
+							let ch = val;
+							buffer.push(ch);
+//							System.out.printf("value = %d - %d - %d - %d - %d - %d\n", (int) ch, (int) b[0], val, (int) buffer.join("").getBytes()[0], (int) buffer.join("").charAt(0), (int) buffer.join("").charAt(1));
 							offset = posEnd + escapeRight.length();
 							continue;
 						}
@@ -61,38 +55,39 @@ public class MessageAdapterTTLV implements MessageAdapter {
 				}
 			}
 			
-			buffer.append(data.charAt(offset++));
+			buffer.push(data.charAt(offset++));
 		}
 		
-		return buffer.toString();
+		return buffer.join("");
 	}
 
-	public void parse(Message message, MessageAdapterConf adapterConf, String root, String data, String directionSuffix) throws Exception {
+	//public
+	static parse(message, adapterConf, root, data, directionSuffix) {
 		// primeiro converte os escapes hexa 
 		data = MessageAdapterTTLV.unEscapeBinaryData(data, "(", ")", 2);
-		List<MessageAdapterConfItem> confs = adapterConf.getMessageAdapterConfItems(root);
-		int offset = 0;
+		const confs = adapterConf.items.filter(element => element.rootPattern != null && root.search(element.rootPattern) >= 0);
+		let offset = 0;
 
 		while (offset < data.length()) {
-			int pos_ini = offset;
+			let pos_ini = offset;
 			
 			while (offset < data.length() && data.charAt(offset) > 0x04) {
 				offset++;
 			}
 			
 			if (offset < data.length() - 2) {
-				String name = data.substring(pos_ini, offset);
-				MessageAdapterConfItem conf = MessageAdapterConf.getMessageAdapterConfItemFromTag(confs, name);
+				let name = data.substring(pos_ini, offset);
+				const conf = adapterConf.items.find(element => element.tag == name);
 
 				if (conf == null) {
 					throw new Exception(String.format("MessageAdapterTTLV.parseMessage : fail to add new field [%s]", name));
 				}
 
-				int contentType = data.charAt(offset++);
-				int size = 0;
+				let contentType = data.charAt(offset++);
+				let size = 0;
 				// parseia o tamanho
 				{
-					char byteVal;
+					let byteVal;
 
 					do {
 						byteVal = data.charAt(offset++);
@@ -103,7 +98,7 @@ public class MessageAdapterTTLV implements MessageAdapter {
 				
 				if (offset <= data.length() - size) {
 					if (contentType == 0x04) {
-						String value = data.substring(offset, offset + size);
+						let value = data.substring(offset, offset + size);
 						parse(message, conf, value);
 						offset += size;
 					} else {
@@ -118,12 +113,13 @@ public class MessageAdapterTTLV implements MessageAdapter {
 		}
 	}
 	// usado internamente em generate
-	private void insertDataLength(StringBuilder buffer, int size) {
-		char aux[] = new char[10];
-		int numBytes = 0;
+	//private
+	static insertDataLength(buffer, size) {
+		let aux = new Array(10);
+		let numBytes = 0;
 
 		while (size > 0) {
-			char byteVal = (char) (size & 0x0000007f);
+			let byteVal = (char) (size & 0x0000007f);
 			size >>= 7;
 
 			if (numBytes > 0) {
@@ -134,33 +130,37 @@ public class MessageAdapterTTLV implements MessageAdapter {
 			numBytes++;
 		}
 		
-		for (int i = numBytes-1; i >= 0; i--) {
-			buffer.append(aux[i]);
+		for (i = numBytes-1; i >= 0; i--) {
+			buffer.push(aux[i]);
 		}
 	}
 	
-	public String generate(Message message, MessageAdapterConf adapterConf, String root) throws Exception {
-		StringBuilder buffer = new StringBuilder(2048);
-		List<MessageAdapterConfItem> confs = adapterConf.getMessageAdapterConfItems(root);
-		
-		for (MessageAdapterConfItem conf : confs) {
-			String fieldName = conf.getFieldName();
-			String str = conf.getFieldDataWithAlign(message);
-			int size = str == null ? 0 : str.length();
+	//public
+	static generate(message, adapterConf, root) {
+		const buffer = new StringBuilder(2048);
+		const confs = adapterConf.items.filter(element => element.rootPattern != null && root.search(element.rootPattern) >= 0);
+
+		for (const conf of confs) {
+			let fieldName = conf.getFieldName();
+			let str = conf.getFieldDataWithAlign(message);
+			let size = str == null ? 0 : str.length();
 			
 			if (size > 0) {
 				// 0042(4)(F)0000000008730110048(4)(4)00020061(4)(3)TEF0071(4)(4)0705
-				buffer.append(fieldName);
-				buffer.append((char) 0x04);
+				buffer.push(fieldName);
+				buffer.push(0x04);
 				insertDataLength(buffer, size);
-				buffer.append(str);
+				buffer.push(str);
 			}
 		}
 		
-		return buffer.toString();
+		return buffer.join("");
 	}
 
-	public String getTagName(String root, String tagPrefix, String tagName) {
+	//public
+	static getTagName(root, tagPrefix, tagName) {
 		return tagName;
 	}
 }
+
+export {MessageAdapterTTLV}

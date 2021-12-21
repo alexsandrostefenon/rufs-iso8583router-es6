@@ -1,6 +1,8 @@
 import {Logger} from "../rufs-base-es6/Logger.js";
 import {CommAdapterSizePayload} from "./CommAdapterSizePayload.js"
 import {CommAdapterPayload} from "./CommAdapterPayload.js"
+import {MessageAdapterISO8583} from "./MessageAdapterISO8583.js"
+import {MessageAdapterTTLV} from "./MessageAdapterTTLV.js"
 import net from "net";
 
 const binaryEndian = {
@@ -13,6 +15,15 @@ const direction = {
 	"DIRECTION_NAME_S2C": "_s2c",
 	"DIRECTION_NAME_C2S": "_c2s"
 };
+
+function StringFormat() {
+	var a = arguments[0];
+	for (var k in arguments) {
+		if (k == 0) continue;
+		a = a.replace(/%s/, arguments[k]);
+	}
+	return a
+}
 
 class Comm {
 	//public
@@ -32,7 +43,7 @@ class Comm {
 	}
 	// retorna o novo offset
 	//public : BinaryEndian packageType, int val
-	static pack(buffer, offset, numBytes, packageType, val) {
+	static packInt(buffer, offset, numBytes, packageType, val) {
 		if (numBytes < 0 || numBytes > 4) {
 			throw new InvalidParameterException();
 		}
@@ -113,148 +124,142 @@ class Comm {
 	}
 	//private : String root
 	static generateMessage(message, messageAdapterConfName, root) {
-		let ret = null;
+		let ret = message.rawData;
+		const adapterConf = Comm.messageAdapterConfMap.get(messageAdapterConfName);
 
-		try {
-			message.bufferParseGenerateDebug.setLength(0);
-			ret = message.rawData;
-			const adapterConf = Comm.messageAdapterConfMap.get(messageAdapterConfName);
-			
-			if (adapterConf != null) {
-				const adapter = Comm.messageAdapterMap.get(adapterConf.adapter);
+		if (adapterConf != null) {
+			const adapter = adapterConf.adapter == "ttlv" ? MessageAdapterTTLV : MessageAdapterISO8583;
+			ret = adapter.generate(message, adapterConf, root);
 
-				if (adapter != null) {
-					ret = adapter.generate(message, adapterConf, root);
-					
-					if (ret == null) {
-						throw new Error("MessageAdapterConfManager.generateMessage : fail in generate String for message : " + message.toString());
-					}
-				} else {
-					throw new Error(String.format("MessageAdapterConfManager.generateMessage : don't found adapter for root = %s and message = %s", root, message.toString()));
-				}
-			} else {
-				throw new Error(String.format("MessageAdapterConfManager.generateMessage : don't found MessageAdapterConf for module = %s", messageAdapterConfName));
+			if (ret == null) {
+				throw new Error("MessageAdapterConfManager.generateMessage : fail in generate String for message : " + message.toString());
 			}
-		} catch (e) {
-			e.printStackTrace();
-			throw e;
+		} else {
+			throw new Error(StringFormat("MessageAdapterConfManager.generateMessage : don't found MessageAdapterConf for module = %s", messageAdapterConfName));
 		}
 		
 		return ret;
 	}
+	// private
+	setupOnData(socket) {
+		this.socket.on("data", buffer => {
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.setupOnData", StringFormat("...received [%s - %s - %s] %s bytes", this.conf.name, this.socket.port, this.socket.localPort, buffer.length));
+			if ((buffer.length + this.bufferReceiveOffset) > this.bufferReceive.length)
+				throw new Error(`[Comm.setupOnData.on('data')] bufferReceive is full (${this.conf.name})`);
+			this.bufferReceive.set(buffer, this.bufferReceiveOffset);
+			this.bufferReceiveOffset += this.socket.bytesRead;
+			const size = this.commAdapter.receive(this);
+			if (size <= 0) return; // wait for more data
+			const data = this.bufferReceive.slice(0, size);
+			this.bufferReceive.set(this.bufferReceive.slice(size), 0);
+			this.bufferReceiveOffset -= size;
+			const str = new TextDecoder("utf-8").decode(data);//"ISO-8859-1");
+			const message = {};
+
+			try {
+				this.log(Logger.LOG_LEVEL_DEBUG, "Comm.setupOnData.onData", `[${this.conf.name}] parsing ${str}`);
+				Comm.parseMessage(message, this.conf.messageAdapterConf, null, str, this.directionNameReceive);
+			} catch (e) {
+				this.log(Logger.LOG_LEVEL_ERROR, "Comm.setupOnData",
+						StringFormat("fail in parseMessage [%s] : [msgSize = %s] : %s", this.conf.name, str.length, e.message),
+						message);
+				throw e;
+			}
+
+			message.moduleIn = this.conf.name;
+			this.listReceive.push(message);
+			this.log(Logger.LOG_LEVEL_INFO, "Comm.setupOnData", StringFormat("received [%s - %s - %s] : %s", this.conf.name, this.socket.port, this.socket.localPort, str), message);
+		});
+	}
 	//public
+	connect() {
+		return new Promise((resolve, reject) => {
+			if (this.socket != null) {
+				resolve();
+			} else {
+				this.socket = net.createConnection(this.conf, () => {
+					this.logger.log(Logger.LOG_LEVEL_DEBUG, "Comm.connect.connectToServer", StringFormat("conexao estabelecida com o servidor [%s - %s - %s]", this.conf.name, this.socket.port, this.socket.localPort), null);
+					this.setupOnData(this.socket);
+					resolve();
+				});
+			}
+		});
+	}
+	//public teste
 	send(message) {
-		message.lockNotify = true;
-		message.setModuleOut(conf.getName());
-		message.transmissionTimeout = true;
-		log(Logger.LOG_LEVEL_DEBUG, "Comm.send", String.format("exported [%s]", this.conf.getName()), message);
-		let str = Comm.generateMessage(message, conf.getMessageConf(), message.getRoot());
-		log(Logger.LOG_LEVEL_DEBUG, "Comm.send", String.format("sending buffer [%s - %s - %s] : [%04d] %s", this.conf.getName(), this.socket.getPort(), this.socket.getLocalPort(), str.length(), str), message);
-		const buffer = str.getBytes("ISO-8859-1");
-		return this.commAdapter.send(this, message, buffer).then(() => {
-			log(Logger.LOG_LEVEL_INFO, "Comm.send", String.format("sended [%s] : [%04d] %s", this.conf.getName(), str.length(), str), message);
+		return this.connect().
+		then(() => {
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.send", `exported [${this.conf.name}]`, message);
+			let str = Comm.generateMessage(message, this.conf.messageAdapterConf, message.root);
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.send", `sending buffer [${this.conf.name} - ${this.socket.port} - ${this.socket.localPort}] : [${str.length}] ${str}`, message);
+			const buffer = new TextEncoder("utf-8").encode(str);//"ISO-8859-1"
+			return this.commAdapter.send(this, message, buffer).then(() => {
+				this.log(Logger.LOG_LEVEL_INFO, "Comm.send", `sended [${this.conf.name}] : [${str.length}] ${str}`, message);
+			});
 		});
 	}
 	//private : String data, String directionSuffix
 	static parseMessage(message, messageAdapterConfName, root, data, directionSuffix) {
-		if (data == null) {
-			throw new InvalidParameterException();
-		}
-		
-		message.bufferParseGenerateDebug.setLength(0);
 		const adapterConf = Comm.messageAdapterConfMap.get(messageAdapterConfName);
 
 		if (adapterConf != null) {
-			const adapter = Comm.messageAdapterMap.get(adapterConf.adapter);
-
-			if (adapter != null) {
-				adapter.parse(message, adapterConf, root, data, directionSuffix);
-			} else {
-				throw new Error(String.format("MessageAdapterConfManager.generateMessage : don't found adapter for root = %s and message = %s", root, message.toString()));
-			}
+			const adapter = adapterConf.adapter == "ttlv" ? MessageAdapterTTLV : MessageAdapterISO8583;
+			adapter.parse(message, adapterConf, root, data, directionSuffix);
 		} else {
-			throw new Error(String.format("MessageAdapterConfManager.generateMessage : don't found MessageAdapterConf for module = %s", messageAdapterConfName));
+			throw new Error(StringFormat("MessageAdapterConfManager.generateMessage : don't found MessageAdapterConf for module = %s", messageAdapterConfName));
 		}
 	}
 	//public
-	receive(messageIn, messageRef) {
-		if (this.socket == null) {
-			throw new Error("disposed");
-		}
-		
-		if (messageIn.getId() == null) {
-			if (messageRef != null) {
-				messageIn.setId(messageRef.getId());
-			} else {
-				messageIn.setId(Message.nextId());
-			}
-		}
+	receive() {
+		return this.connect().
+		then(() => {
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.receive", StringFormat("wait receive [%s - %s - %s] ...", this.conf.name, this.socket.port, this.socket.localPort));
+			return new Promise((resolve, reject) => {
+				const callback = partialData => {
+					if (this.listReceive.length == 0) return;
+					this.socket.off("data", callback);
+					const message = this.listReceive.shift();
+					resolve(message);
+				};
 
-		log(Logger.LOG_LEVEL_DEBUG, "Comm.receive", String.format("wait receive [%s - %s - %s] ...", this.conf.getName(), this.socket.getPort(), this.socket.getLocalPort()), messageIn);
-		let size = this.commAdapter.receive(this, messageIn, messageIn.bufferComm);
-
-		if (size > 0) {
-			const str = new String(messageIn.bufferComm, 0, size, "ISO-8859-1");
-			const rawData = str;
-			// TODO : estou forçando um sleep para sincronizar o debug das threads
-//			Thread.sleep(10);
-
-			try {
-				Comm.parseMessage(messageIn, this.conf.getMessageConf(), messageIn.getRoot(), str, this.directionNameReceive);
-			} catch (e) {
-				log(Logger.LOG_LEVEL_ERROR, "Comm.receive",
-						String.format("parseMessage [%s] : [msgSize = %d] : %s", this.conf.getName(), size, e.getMessage()),
-						messageIn);
-				throw e;
-			}
-
-			messageIn.transmissionTimeout = false;
-			messageIn.setModuleIn(conf.getName());
-			messageIn.setModuleOut(null);
-			messageIn.rawData = rawData;
-			log(Logger.LOG_LEVEL_INFO, "Comm.receive", String.format("received [%s - %s - %s] : %s", this.conf.getName(), this.socket.getPort(), this.socket.getLocalPort(), str), messageIn);
-		} else {
-			log(Logger.LOG_LEVEL_INFO, "Comm.receive", String.format("not data received [%s - %s - %s]", this.conf.getName(), this.socket.getPort(), this.socket.getLocalPort()), messageIn);
-		}
-
-		return size;
+				this.socket.on("data", callback);
+				callback();
+			});
+		});
 	}
 	//CommConf conf
 	constructor(conf, logger, socket) {
-		let isServer = true;
-
-		if (socket == null) {
-			isServer = false;
-//			socket = net.createConnection(conf);
-		}
-
 		this.conf = conf;
 		this.socket = socket;
+		this.bufferReceiveOffset = 0;
 		this.bufferReceive = new Uint8Array(64 * 1024);
 		this.bufferSend = new Uint8Array(64 * 1024);
 		this.logger = logger;
-		logger.log(Logger.LOG_LEVEL_DEBUG, "Comm.initialize", `modulo v2 [${conf.name}]`);
+		this.listReceive = new Array();
 
 		if (conf.adapter == "CommAdapterSizePayload")
 			this.commAdapter = new CommAdapterSizePayload();
 		else
 			this.commAdapter = new CommAdapterPayload();
 
-		if (isServer == true) {
+		if (socket != null) {
 			this.directionNameReceive = direction.DIRECTION_NAME_C2S;
 //			this.directionNameSend = direction.DIRECTION_NAME_S2C;
 		} else {
 			this.directionNameReceive = direction.DIRECTION_NAME_S2C;
 //			this.directionNameSend = direction.DIRECTION_NAME_C2S;
 		}
+
+		if (socket != null) this.setupOnData(socket);
+		this.log(Logger.LOG_LEVEL_DEBUG, "Comm.initialize", `modulo v2 [${conf.name}]`);
 	}
 	//public
 	close() {
-		log(Logger.LOG_LEVEL_DEBUG, "Comm.close", String.format("fechando conexao... [%s - %s - %s]", this.conf.getName(), this.socket.getPort(), this.socket.getLocalPort()), null);
+		this.log(Logger.LOG_LEVEL_DEBUG, "Comm.close", StringFormat("fechando conexao... [%s - %s - %s]", this.conf.name, this.socket.getPort(), this.socket.getLocalPort()), null);
 		
 		if (this.socket.isClosed() == false) {
 			this.socket.close();
-			log(Logger.LOG_LEVEL_DEBUG, "Comm.close", String.format("...conexao fechada [%s - %s - %s]", this.conf.getName(), this.socket.getPort(), this.socket.getLocalPort()), null);
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.close", StringFormat("...conexao fechada [%s - %s - %s]", this.conf.name, this.socket.getPort(), this.socket.getLocalPort()), null);
 		}
 	}
 }

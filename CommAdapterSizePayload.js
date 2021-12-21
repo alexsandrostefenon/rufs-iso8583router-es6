@@ -1,52 +1,42 @@
+import {Comm} from "./Comm.js"
 
 class CommAdapterSizePayload {
 
 	send(comm, message, payload) {
-		const size = payload.length;
-		let offset = 0;
-		const buffer = new UInt8Array(size+4);
-		
-		if (comm.conf.getSizeAscii()) {
-			const strSize = size.toString().padStart(4, "0");
-			offset = Comm.pack(buffer, offset, strSize.length(), strSize.getBytes());
-		} else {
-			offset = Comm.pack(buffer, offset, 2, comm.conf.getEndianType(), size);
-		}
-		
-		offset = Comm.pack(buffer, offset, payload.length, payload);
-		comm.os.write(buffer, 0, offset);
+		return new Promise((resolve, reject) => {
+			const size = payload.length;
+			let offset = 0;
+			const buffer = new Uint8Array(size+4);
+
+			if (comm.conf.sizeAscii == true) {
+				const strSize = size.toString().padStart(4, "0");
+				const bufferStrSize = new TextEncoder().encode(strSize);
+				offset = Comm.pack(buffer, offset, strSize.length, bufferStrSize);
+			} else {
+				offset = Comm.packInt(buffer, offset, 2, comm.conf.endianType, size);
+			}
+
+			offset = Comm.pack(buffer, offset, payload.length, payload);
+			comm.socket.write(buffer, () => resolve());
+		});
 	}
 
 	receive(comm, message, payload) {
-		const size = {};
+		let size = 0;
 
-		if (comm.conf.getSizeAscii()) {
-			const readen = comm.is.read(payload, 0, 4);
-
-			if (readen != 4) {
-				throw new IOException("CommAdapterSizePayload.read : Invalid size len received");
-			}
-
-			const strSize = new String(payload, 0, 4, "ISO-8859-1");
-			size.value = Integer.parseInt(strSize);
+		if (comm.conf.sizeAscii == true) {
+			if (comm.bufferReceiveOffset < 4) return -1;
+			const str = new TextDecoder("utf-8").decode(comm.bufferReceive.slice(0, 4));//"ISO-8859-1");
+			size = Number.parseInt(str);
 		} else {
-			Comm.unpack(comm.is, payload, 0, 2, comm.conf.getEndianType(), size);
+			const view = new DataView(comm.bufferReceive.buffer, 0);
+			size = view.getUint16(0, true); // true here represents little-endian of comm.conf.endianType
 		}
 
-		if (size.value > 0 && size.value < payload.length) {
-			const readen = comm.is.read(payload, 0, size.value);
-
-			if (readen != size.value) {
-				throw new IOException("CommAdapterSizePayload.read : Invalid size len received");
-			}
-
-			rc = size.value;
-		}
-
-		return rc;
-	}
-
-	setup(paramsSend, paramsReceive) {
+		if (comm.bufferReceiveOffset < (4 + size)) return -1;
+		for (let i = 0; i < size; i++) comm.bufferReceive[i] = comm.bufferReceive[i+4];
+		comm.bufferReceiveOffset -= 4;
+		return size;
 	}
 
 }

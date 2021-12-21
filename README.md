@@ -17,9 +17,7 @@ PATH=./node-v12.22.0-linux-$ARCH/bin/:$PATH;
 `
 Install :
 `
-./node-v12.22.0-linux-*/bin/npm install ./rufs-iso8583router-es6 --ignore-scripts;
-#or
-#yarnpkg install --cwd ./rufs-iso8583router-es6;
+npm install ./rufs-iso8583router-es6;
 ln -s node_modules/rufs-* ./;
 `
 ## Run Ecosystem

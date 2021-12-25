@@ -1,5 +1,4 @@
 class MessageAdapterTTLV {
-	
 	//private
 	static parse(message, conf, value) {
 		if (value != null && value.length() > 0) {
@@ -14,7 +13,6 @@ class MessageAdapterTTLV {
 			MessageAdapterConfItem.setFieldData(conf, message, null);
 		}
 	}
-	
 	//private
 	static unEscapeBinaryData(data, escapeLeft, escapeRight, maxEscapeSize) {
 		if (data == null) {
@@ -60,9 +58,8 @@ class MessageAdapterTTLV {
 		
 		return buffer.join("");
 	}
-
 	//public
-	static parse(message, adapterConf, root, data, directionSuffix) {
+	static parse(message, adapterConf, data, directionSuffix, root) {
 		// primeiro converte os escapes hexa 
 		data = MessageAdapterTTLV.unEscapeBinaryData(data, "(", ")", 2);
 		const confs = adapterConf.items.filter(element => element.rootPattern != null && root.search(element.rootPattern) >= 0);
@@ -142,7 +139,7 @@ class MessageAdapterTTLV {
 
 		for (const conf of confs) {
 			let fieldName = conf.getFieldName();
-			let str = conf.getFieldDataWithAlign(message);
+			let str = MessageAdapterConfItem.getFieldDataWithAlign(conf, message);
 			let size = str == null ? 0 : str.length();
 			
 			if (size > 0) {
@@ -157,10 +154,6 @@ class MessageAdapterTTLV {
 		return buffer.join("");
 	}
 
-	//public
-	static getTagName(root, tagPrefix, tagName) {
-		return tagName;
-	}
 }
 
 export {MessageAdapterTTLV}

@@ -1,8 +1,22 @@
 import {MicroServiceClient} from "../../rufs-base-es6/MicroServiceClient.js";
 import {HttpRestRequest} from "../../rufs-base-es6/webapp/es6/ServerConnection.js";
 import {ISO8583RouterMicroService} from "../ISO8583RouterMicroService.js";
-import {Comm} from "../Comm.js";
+import {MessageAdapterISO8583} from "../MessageAdapterISO8583.js"
 import net from "net";
+
+const iso8583defaultConf = {
+	"items": [
+		{"id": 0, "fieldName": "msgType", "minLength": 4},
+		{"id": 2, "fieldName": "pan", "minLength": 12, sizeHeader: 2},
+		{"id": 3, "fieldName": "codeProcess", "minLength": 6},
+		{"id": 4, "fieldName": "transactionValue", "minLength": 12},
+		{"id": 11, "fieldName": "captureNsu", "minLength": 6},
+		{"id": 39, "fieldName": "codeResponse", "minLength": 2},
+		{"id": 42, "fieldName": "captureEc", "minLength": 15},
+		{"id": 41, "fieldName": "equipamentId", "minLength": 8},
+		{"id": 67, "fieldName": "numPayments", "minLength": 2}
+	]
+};
 
 const getCommConfList = () => {
 	const rufsClientAdmin = new MicroServiceClient({port: 9080, loginPath: "rest/login", "appName":"", "user":"admin", "password":HttpRestRequest.MD5("admin")});
@@ -36,26 +50,29 @@ const getCommConfList = () => {
 let lastMsgTypeInAuth = "";
 
 const createServerAuth = (commConf, logger) => {
-	const server = net.createServer(client => {
-		console.log(`[Test] conexao recebida do cliente ${commConf.name} - ${client.port} -  ${client.localPort}`);
-		const comm = new Comm(commConf, logger, client);
+	const server = net.createServer(socket => {
+		console.log(`[Test] conexao recebida do cliente ${commConf.name} - ${socket.port} -  ${socket.localPort}`);
 
-		client.on("data", partialBuffer => {
-			comm.receive().
-			then(message => {
-				console.log(`[Test] received message in ${commConf.name}`);
-				lastMsgTypeInAuth = message.msgType;
+		socket.on("data", data => {
+			console.log(`[Test] received message in ${commConf.name}`);
+			const message = {};
+			const size = (data[0] - 48) * 1000 + (data[1] - 48) * 100 + (data[2] - 48) * 10 + (data[3] - 48);
+			if (size + 4 != data.length) throw new Error(`Size header don't match with package length`);
+			const strIn = new TextDecoder("utf-8").decode(data.slice(4));//"ISO-8859-1");
+			MessageAdapterISO8583.parse(message, iso8583defaultConf, strIn);
+			lastMsgTypeInAuth = message.msgType;
 
-				if (message.msgType == "0200" && message.codeProcess == "003000") {
-					message.msgType = "0210";
-					message.codeResponse = "00";
-					return comm.send(message);
-				} else if (message.msgType == "0202" && message.codeProcess == "003000") {
-					console.log(`[Test] received confirmation in ${commConf.name}`);
-				} else {
-					console.error(`[Test] invalid transaction :`, message);
-				}
-			});
+			if (message.msgType == "0200" && message.codeProcess == "003000") {
+				message.msgType = "0210";
+				message.codeResponse = "00";
+				const strOut = MessageAdapterISO8583.generate(message, iso8583defaultConf);
+				const strOutSize = strOut.length.toString().padStart(4, "0");
+				socket.write(strOutSize + strOut, () => console.log(`Enviado ${strOutSize + strOut}`));
+			} else if (message.msgType == "0202" && message.codeProcess == "003000") {
+				console.log(`[Test] received confirmation in ${commConf.name}`);
+			} else {
+				console.error(`[Test] invalid transaction :`, message);
+			}
 		});
 	});
 
@@ -65,6 +82,22 @@ const createServerAuth = (commConf, logger) => {
 		});
 	});
 }
+
+const request = (socket, messageOut, waitResponse) => {
+	const dataSend = MessageAdapterISO8583.generate(messageOut, iso8583defaultConf);
+	return new Promise((resolve, reject) => socket.write(dataSend, () => resolve())).
+	then(() => {
+		if (waitResponse == false) return Promise.resolve();
+		return new Promise((resolve, reject) => {
+			socket.on('data', data => {
+				const messageIn = {};
+				const strIn = new TextDecoder("utf-8").decode(data);//"ISO-8859-1");
+				MessageAdapterISO8583.parse(messageIn, iso8583defaultConf, strIn);
+				resolve(messageIn);
+			});
+		});
+	});
+};
 
 const serverInstance = new ISO8583RouterMicroService({"logLevel": "DEBUG"});
 console.log("iniciando servidor...");
@@ -89,14 +122,16 @@ then(() => {
 
 			console.log("enviando solicitação de compra...");
 			const commConf = commConfList.find(element => element.name == "POS");
-			const comm = new Comm(commConf, serverInstance.logger);
-			return comm.send(message).
-			then(() => comm.receive()).
+			let client;
+			return new Promise((resolve, reject) => {
+				client = net.createConnection(commConf, () => resolve());
+			}).
+			then(() => request(client, message, true)).
 			then(messageIn => {
 				console.log("...resposta recebida:", messageIn);
 				if (messageIn == null || messageIn.msgType != "0210" || messageIn.codeResponse != "00") throw new Error(`invalid response`);
 				message.msgType = "0202";
-				return comm.send(message);
+				return request(client, message, false);
 			}).
 			then(() => {
 				return new Promise((resolve, reject) => {

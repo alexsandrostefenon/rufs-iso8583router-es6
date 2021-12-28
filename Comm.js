@@ -143,11 +143,11 @@ class Comm {
 	// private
 	setupOnData(socket) {
 		this.socket.on("data", buffer => {
-			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.setupOnData", StringFormat("...received [%s - %s - %s] %s bytes", this.conf.name, this.socket.port, this.socket.localPort, buffer.length));
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.setupOnData", `...received [${this.conf.name} - ${this.socket.port} - ${this.socket.localPort}] ${buffer.length} bytes`);
 			if ((buffer.length + this.bufferReceiveOffset) > this.bufferReceive.length)
 				throw new Error(`[Comm.setupOnData.on('data')] bufferReceive is full (${this.conf.name})`);
 			this.bufferReceive.set(buffer, this.bufferReceiveOffset);
-			this.bufferReceiveOffset += this.socket.bytesRead;
+			this.bufferReceiveOffset += buffer.length;
 			const size = this.commAdapter.receive(this);
 			if (size <= 0) return; // wait for more data
 			const data = this.bufferReceive.slice(0, size);

@@ -1,5 +1,8 @@
 import {CrudMicroService} from "../rufs-crud-es6/CrudMicroService.js";
 import {Logger} from "../rufs-base-es6/Logger.js";
+import {OpenApi} from "../rufs-base-es6/webapp/es6/OpenApi.js";
+import {RequestFilter} from "../rufs-base-es6/RequestFilter.js";
+import {Response} from "../rufs-base-es6/server-utils.js";
 import {Comm} from "./Comm.js";
 import net from "net";
 import fs from "fs";
@@ -177,11 +180,15 @@ class ISO8583RouterMicroService extends CrudMicroService {
 		message.sendResponse = false;
 		message.systemDateTime = new Date();
 		this.logger.log(Logger.LOG_LEVEL_TRACE, "Connector.route", StringFormat("routing to module [%s]", ref.module), message);
-		return this.commOut(message);
-	}
-	//private
-	static checkValue(strData, strValue) {
-		return strData != null && strData == strValue;
+		let sessionClient = this.clients.find(element => element.commConf.name == message.module);
+
+		if (sessionClient == null) {
+			sessionClient = this.bidirecionals.find(element => element.commConf.name == message.module);
+		}
+
+		if (sessionClient == null) throw new Error(`Dont find connection for ${message.module}`);
+		this.logger.log(Logger.LOG_LEVEL_TRACE, "ISO8583RouterMicroService.route", StringFormat("sending to [%s]", sessionClient.commConf.name), message);
+		return sessionClient.execute(message);
 	}
 
 	listen() {
@@ -194,7 +201,7 @@ class ISO8583RouterMicroService extends CrudMicroService {
 					comm.receive().
 					then(message => {
 						this.logger.log(Logger.LOG_LEVEL_TRACE, "ConnectorServer.req", StringFormat("[%s] : routing", commConf.name), message);
-						return this.route(message, commConf).
+						return this.route(message).
 						then(message => {
 							if (message == null) return Promise.resolve();
 							return comm.send(message);
@@ -297,18 +304,6 @@ class ISO8583RouterMicroService extends CrudMicroService {
 		this.logger.log(Logger.LOG_LEVEL_TRACE, "Connector.stop", "...sessions finischieds.", null);
 		this.logger.log(Logger.LOG_LEVEL_TRACE, "Connector.stop",	"--------------------------------------------------------------------------------------", null);
 	}
-	// private 
-	commOut(message) {
-		let sessionClient = this.clients.find(element => element.commConf.name == message.module);
-
-		if (sessionClient == null) {
-			sessionClient = this.bidirecionals.find(element => element.commConf.name == message.module);
-		}
-
-		if (sessionClient == null) throw new Error(`Dont find connection for ${message.module}`);
-		this.logger.log(Logger.LOG_LEVEL_TRACE, "Connector.commOut", StringFormat("sending to [%s]", sessionClient.commConf.name), message);
-		return sessionClient.execute(message);
-	}
 
 	constructor(config) {
 		if (config == null) config = {};
@@ -328,6 +323,49 @@ class ISO8583RouterMicroService extends CrudMicroService {
 		this.logger = new ISO8583RouterLogger(config.logLevel);
 	}
 
+	loadOpenApi() {
+		return super.loadOpenApi().
+		then(openapi => {
+			const requestSchemas = {"payment": {properties: {
+				"msgType": {enum: ["0200", "0202"]},
+				"pan": {pattern: "^\\d{12,16}$"},
+				"codeProcess": {enum: ["002000", "003000"]},
+				"transactionValue": {type: "number"},
+				"captureNsu": {type: "integer"},
+				"captureEc": {type: "integer"},
+				"equipamentId": {maxLength: 8},
+				"numPayments": {type: "integer"}
+			}}};
+			const responseSchemas = {payment: {properties: {
+				"msgType": {enum: ["0210"]},
+				"codeProcess": {enum: ["002000", "003000"]},
+				"transactionValue": {type: "number"},
+				"captureNsu": {type: "integer"},
+				"codeResponse": {enum: ["00", "99"]},
+				"captureEc": {type: "integer"},
+				"equipamentId": {maxLength: 8},
+				"numPayments": {type: "integer"}
+			}}};
+			return OpenApi.fillOpenApi(openapi, {"methods": ["post"], requestSchemas, "schemas": responseSchemas});
+		}).
+		then(openapi => {
+			return this.storeOpenApi(openapi);
+		}).
+		then(openapi => this.openapi = openapi);
+	}
+	// intercept any request before authorization
+	onRequest(req, res, next, resource, action) {
+		if (resource == "payment") {
+			const isAuthorized = RequestFilter.checkAuthorization(req, resource, action);
+
+			if (isAuthorized == true) {
+				this.logger.log(Logger.LOG_LEVEL_TRACE, "ConnectorServer.req", `routing from http rest server...`, req.body);
+				return this.route(req.body).then(messageIn => Response.ok(messageIn));
+			}
+		}
+
+		return super.onRequest(req, res, next, resource, action);
+	}
 }
 
 ISO8583RouterMicroService.checkStandalone();

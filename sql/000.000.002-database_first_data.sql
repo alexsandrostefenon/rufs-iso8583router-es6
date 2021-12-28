@@ -9,8 +9,8 @@ values
 (4, 'transactionValue', '4', 12, 12, 0, '\d{4}_\d{6}', 'iso8583default', 1),
 (11, 'captureNsu', '11', 6, 6, 0, '\d{4}_\d{6}', 'iso8583default', 1),
 (39, 'codeResponse', '39', 2, 2, 0, '0210_\d{6}', 'iso8583default', 1),
-(42, 'captureEc', '42', 15, 15, 0, '\d{4}_\d{6}', 'iso8583default', 1),
 (41, 'equipamentId', '41', 8, 8, 0, '\d{4}_\d{6}', 'iso8583default', 1),
+(42, 'captureEc', '42', 15, 15, 0, '\d{4}_\d{6}', 'iso8583default', 1),
 (67, 'numPayments', '67', 2, 2, 0, '0200_\d{6}', 'iso8583default', 1)
 ;
 

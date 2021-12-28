@@ -45,7 +45,7 @@ class Comm {
 	//public : BinaryEndian packageType, int val
 	static packInt(buffer, offset, numBytes, packageType, val) {
 		if (numBytes < 0 || numBytes > 4) {
-			throw new InvalidParameterException();
+			throw new Error();
 		}
 
 		if (packageType == BinaryEndian.LITTLE) {
@@ -70,7 +70,7 @@ class Comm {
 	//public
 	static pack(buffer, offset, numBytes, valByteArray) {
 		if (numBytes < 0 || numBytes > valByteArray.length) {
-			throw new InvalidParameterException();
+			throw new Error();
 		}
 
 		for (let i = 0; i < numBytes; i++) {
@@ -95,7 +95,7 @@ class Comm {
 		val.value = 0;
 
 		if (numBytes < 0 || numBytes > 4) {
-			throw new InvalidParameterException();
+			throw new Error();
 		}
 
 		if (packageType == BinaryEndian.LITTLE) {
@@ -143,11 +143,11 @@ class Comm {
 	// private
 	setupOnData(socket) {
 		this.socket.on("data", buffer => {
-			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.setupOnData", StringFormat("...received [%s - %s - %s] %s bytes", this.conf.name, this.socket.port, this.socket.localPort, buffer.length));
+			this.log(Logger.LOG_LEVEL_DEBUG, "Comm.setupOnData", `...received [${this.conf.name} - ${this.socket.port} - ${this.socket.localPort}] ${buffer.length} bytes`);
 			if ((buffer.length + this.bufferReceiveOffset) > this.bufferReceive.length)
 				throw new Error(`[Comm.setupOnData.on('data')] bufferReceive is full (${this.conf.name})`);
 			this.bufferReceive.set(buffer, this.bufferReceiveOffset);
-			this.bufferReceiveOffset += this.socket.bytesRead;
+			this.bufferReceiveOffset += buffer.length;
 			const size = this.commAdapter.receive(this);
 			if (size <= 0) return; // wait for more data
 			const data = this.bufferReceive.slice(0, size);
@@ -204,7 +204,7 @@ class Comm {
 
 		if (adapterConf != null) {
 			const adapter = adapterConf.adapter == "ttlv" ? MessageAdapterTTLV : MessageAdapterISO8583;
-			adapter.parse(message, adapterConf, root, data, directionSuffix);
+			adapter.parse(message, adapterConf, data, directionSuffix, root);
 		} else {
 			throw new Error(StringFormat("MessageAdapterConfManager.generateMessage : don't found MessageAdapterConf for module = %s", messageAdapterConfName));
 		}

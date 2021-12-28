@@ -42,23 +42,16 @@ Note, database "iso8583router_development" is only for testing purposes.
 ### Run Ecosystem
 
 #Only to clean already existent configuration :
-
 rm *openapi-iso8583router.json;
 
 #Only to clean already existent testing data :
+PGHOST=localhost PGUSER=development PGPASSWORD=123456 psql iso8583router_development -c "DROP DATABASE IF EXISTS iso8583router;";
 
-export PGHOST=localhost;
-export PGPORT=5432;
-export PGUSER=development;
-export PGPASSWORD=123456;
-
-psql iso8583router_development -c "DROP DATABASE IF EXISTS iso8583router;" &&
-psql iso8583router_development -c "CREATE DATABASE iso8583router;" &&
+PGHOST=localhost PGUSER=development PGPASSWORD=123456 psql iso8583router_development -c "CREATE DATABASE iso8583router;";
 
 #Execute rufs-proxy to load and start microservices :
 
-PGHOST=localhost PGPORT=5432 PGUSER=development PGPASSWORD=123456 PGDATABASE=iso8583router nodejs ./rufs-base-es6/proxy.js --add-modules ../rufs-iso8583router-es6/ISO8583RouterMicroService.js;
-#PGHOST=localhost PGPORT=5432 PGUSER=development PGPASSWORD=123456 PGDATABASE=iso8583router nodejs --inspect ./rufs-iso8583router-es6/ISO8583RouterMicroService.js;
+PGHOST=localhost PGUSER=development PGPASSWORD=123456 PGDATABASE=iso8583router nodejs ./rufs-base-es6/proxy.js --add-modules ../rufs-iso8583router-es6/ISO8583RouterMicroService.js;
 
 ## Web application
 

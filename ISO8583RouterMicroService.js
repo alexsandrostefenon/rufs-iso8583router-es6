@@ -325,7 +325,7 @@ class ISO8583RouterMicroService extends CrudMicroService {
 
 	loadOpenApi() {
 		return super.loadOpenApi().
-		then(openapi => {
+		then(() => {
 			const requestSchemas = {"payment": {properties: {
 				"msgType": {enum: ["0200", "0202"]},
 				"pan": {pattern: "^\\d{12,16}$"},
@@ -346,17 +346,17 @@ class ISO8583RouterMicroService extends CrudMicroService {
 				"equipamentId": {maxLength: 8},
 				"numPayments": {type: "integer"}
 			}}};
-			return OpenApi.fillOpenApi(openapi, {"methods": ["post"], requestSchemas, "schemas": responseSchemas});
+			return OpenApi.fillOpenApi(this.openapi, {"methods": ["post"], requestSchemas, "schemas": responseSchemas});
 		}).
-		then(openapi => {
-			return this.storeOpenApi(openapi);
-		}).
-		then(openapi => this.openapi = openapi);
+		then(() => {
+			return this.storeOpenApi();
+		})
 	}
 	// intercept any request before authorization
-	onRequest(req, res, next, resource, action) {
-		if (resource == "payment") {
-			const isAuthorized = RequestFilter.checkAuthorization(req, resource, action);
+	onRequest(req, res, next) {
+		if (req.path == "/payment") {
+			const rf = new RequestFilter(req, this)
+			const isAuthorized = rf.checkAuthorization(req)
 
 			if (isAuthorized == true) {
 				this.logger.log(Logger.LOG_LEVEL_TRACE, "ConnectorServer.req", `routing from http rest server...`, req.body);
@@ -364,7 +364,7 @@ class ISO8583RouterMicroService extends CrudMicroService {
 			}
 		}
 
-		return super.onRequest(req, res, next, resource, action);
+		return super.onRequest(req, res, next);
 	}
 }
 
